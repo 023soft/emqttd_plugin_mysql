@@ -27,38 +27,44 @@
 
 -define(EMPTY(Username), (Username =:= undefined orelse Username =:= <<>>)).
 
-init({AuthSql, HashType}) -> 
-    {ok, #state{auth_sql = AuthSql, hash_type = HashType}}.
+init({AuthSql, HashType}) ->
+  {ok, #state{auth_sql = AuthSql, hash_type = HashType}}.
 
 check(#mqtt_client{username = Username}, Password, _State)
-    when ?EMPTY(Username) orelse ?EMPTY(Password) ->
-    {error, undefined};
+  when ?EMPTY(Username) orelse ?EMPTY(Password) ->
+  {error, undefined};
 
 check(#mqtt_client{username = Username}, Password,
-        #state{auth_sql = AuthSql, hash_type = HashType}) ->
-    case emqttd_mysql_pool:query(replvar(AuthSql, Username)) of
-        {ok, [<<"password">>], [[PassHash]]} ->
-            check_pass(PassHash, Password, HashType);
-        {ok, [<<"password">>, <<"salt">>], [[PassHash, Salt]]} ->
-            check_pass(PassHash, Salt, Password, HashType);
-        {ok, []} ->
-            {error, notfound};
-        {error, Error} ->
-            {error, Error}
-    end.
+    #state{auth_sql = AuthSql, hash_type = HashType}) ->
+  case emqttd_mysql_pool:query(replvar(AuthSql, Username)) of
+    {ok, [<<"password">>], [[PassHash]]} ->
+      check_pass(PassHash, Password, HashType);
+    {ok, [<<"password">>, <<"salt">>], [[PassHash, Salt]]} ->
+      check_pass(PassHash, Salt, Password, HashType);
+    {ok, [<<"username">>, <<"salt">>], [[PassHash, Salt]]} ->
+      check_pass(Password, Salt, PassHash, HashType);
+    {ok, []} ->
+      {error, notfound};
+    {error, Error} ->
+      {error, Error}
+  end.
 
 replvar(AuthSql, Username) ->
-    re:replace(AuthSql, "%u", Username, [global, {return, list}]).
+  re:replace(AuthSql, "%u", Username, [global, {return, list}]).
 
 check_pass(PassHash, Password, HashType) ->
-    check_pass(PassHash, hash(HashType, Password)).
+  check_pass(PassHash, hash(HashType, Password)).
+
 check_pass(PassHash, Salt, Password, {salt, HashType}) ->
-    check_pass(PassHash, hash(HashType, <<Salt/binary, Password/binary>>));
+  check_pass(PassHash, hash(HashType, <<Salt/binary, Password/binary>>));
+
 check_pass(PassHash, Salt, Password, {HashType, salt}) ->
-    check_pass(PassHash, hash(HashType, <<Password/binary, Salt/binary>>)).
+  %%io:format("passhash ~p~p ~p ~p ~p ~n", [HashType, PassHash, Password, Salt, hash(HashType, <<PassHash/binary, Salt/binary>>)]),
+  check_pass(PassHash, hash(HashType, <<Password/binary, Salt/binary>>)).
+
 
 check_pass(PassHash, PassHash) -> ok;
-check_pass(_, _)               -> {error, password_error}.
+check_pass(_, _) -> {error, password_error}.
 
 description() -> "Authentication by MySQL".
 
